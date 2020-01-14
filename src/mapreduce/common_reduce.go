@@ -1,47 +1,78 @@
 package mapreduce
 
+import (
+	"encoding/json"
+	"log"
+	"os"
+	"sort"
+)
+
+// doReduce() reads the intermediate files for the task,
+// sorts the intermediate key/value pairs by key,
+// calls the user-defined reduce function (reduceF) for each key,
+// writes reduceF's output to disk.
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
 	outFile string, // write the output here
 	nMap int, // the number of map tasks that were run ("M" in the paper)
-	reduceF func(key string, values []string) string,
+	reduceF func(key string, values []string) string, // the application's reduce function
 ) {
-	//
-	// doReduce manages one reduce task: it should read the intermediate
-	// files for the task, sort the intermediate key/value pairs by key,
-	// call the user-defined reduce function (reduceF) for each key, and
-	// write reduceF's output to disk.
-	//
-	// You'll need to read one intermediate file from each map task;
-	// reduceName(jobName, m, reduceTask) yields the file
-	// name from map task m.
-	//
-	// Your doMap() encoded the key/value pairs in the intermediate
-	// files, so you will need to decode them. If you used JSON, you can
-	// read and decode by creating a decoder and repeatedly calling
-	// .Decode(&kv) on it until it returns an error.
-	//
-	// You may find the first example in the golang sort package
-	// documentation useful.
-	//
-	// reduceF() is the application's reduce function. You should
-	// call it once per distinct key, with a slice of all the values
-	// for that key. reduceF() returns the reduced value for that key.
-	//
-	// You should write the reduce output as JSON encoded KeyValue
-	// objects to the file named outFile. We require you to use JSON
-	// because that is what the merger than combines the output
-	// from all the reduce tasks expects. There is nothing special about
-	// JSON -- it is just the marshalling format we chose to use. Your
-	// output code will look something like this:
-	//
-	// enc := json.NewEncoder(file)
-	// for key := ... {
-	// 	enc.Encode(KeyValue{key, reduceF(...)})
-	// }
-	// file.Close()
-	//
-	// Your code here (Part I).
-	//
+
+	var (
+		keyList   sort.StringSlice
+		objMerged = make(map[string][]string)
+	)
+
+	// read one intermediate file from each map task
+	for m := 0; m < nMap; m++ {
+		imdFilename := reduceName(jobName, m, reduceTask)
+		imdFile, err := os.Open(imdFilename)
+		if err != nil {
+			log.Printf("doReduce os.Open err = %v, filename = %s \n", err, imdFilename)
+			continue
+		}
+
+		// doMap() encoded the key/value pairs in the intermediate files, so need to decode them.
+		// get the values of each key for calling reduceF()
+		dec := json.NewDecoder(imdFile)
+		for true {
+			var kv KeyValue
+			err = dec.Decode(&kv)
+			if err != nil {
+				break
+			}
+
+			keyList = append(keyList, kv.Key)
+			objMerged[kv.Key] = append(objMerged[kv.Key], kv.Value)
+		}
+
+		imdFile.Close()
+	}
+
+	// sort the intermediate key/value pairs by key
+	sort.Sort(keyList)
+
+	// write the reduce output as JSON encoded KeyValue objects to the file named outFile
+	file, err := os.Create(outFile)
+	if err != nil {
+		log.Fatalf("doReduce os.Create err = %v, filename = %s \n", err, outFile)
+	}
+
+	enc := json.NewEncoder(file)
+
+	for _, k := range keyList {
+		// call reduceF() once per distinct key, with a slice of all the values for that key
+		v := reduceF(k, objMerged[k])
+		err = enc.Encode(KeyValue{
+			Key:   k,
+			Value: v,
+		})
+		if err != nil {
+			log.Printf("doReduce enc.Encode err = %v, key = %v, value = %v \n", err, k, v)
+			continue
+		}
+	}
+
+	file.Close()
 }
