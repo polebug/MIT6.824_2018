@@ -8,16 +8,16 @@ import (
 	"os"
 )
 
-// ihash: hash algorithm with key
+// ihash() is a hash algorithm with key
 func ihash(s string) int {
 	h := fnv.New32a()
 	h.Write([]byte(s))
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// doMap:
-// read one of the input files(inFile), call the user-defined map function (mapF) for that file's contents,
-// and partition mapF's output into nReduce intermediate files
+// doMap() reads one of the input files(inFile),
+// calls the user-defined map function (mapF) for that file's contents,
+// and partitions mapF's output into nReduce intermediate files
 func doMap(
 	jobName string, // the name of the MapReduce job
 	mapTask int, // which map task this is
@@ -34,7 +34,7 @@ func doMap(
 
 	kvList := mapF(inFile, string(inputContents))
 
-	// generat the intermediate file(mrtmp.xxx-0-0) for reduce task `r`, and use JSON to format it.
+	// generate the intermediate file(mrtmp.xxx-0-0) for reduce task `r`, and use JSON to format it.
 	for r := 0; r < nReduce; r++ {
 		imdFile := reduceName(jobName, mapTask, r)
 

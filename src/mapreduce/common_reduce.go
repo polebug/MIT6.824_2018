@@ -7,16 +7,10 @@ import (
 	"sort"
 )
 
-// StringSlice define sort interface
-type StringSlice []string
-
-func (keyList StringSlice) Len() int           { return len(keyList) }
-func (keyList StringSlice) Swap(i, j int)      { keyList[i], keyList[j] = keyList[j], keyList[i] }
-func (keyList StringSlice) Less(i, j int) bool { return keyList[i] < keyList[j] }
-
-// doReduce:
-// read the intermediate files for the task, sort the intermediate key/value pairs by key,
-// call the user-defined reduce function (reduceF) for each key, and write reduceF's output to disk.
+// doReduce() reads the intermediate files for the task,
+// sorts the intermediate key/value pairs by key,
+// calls the user-defined reduce function (reduceF) for each key,
+// writes reduceF's output to disk.
 func doReduce(
 	jobName string, // the name of the whole MapReduce job
 	reduceTask int, // which reduce task this is
@@ -26,7 +20,7 @@ func doReduce(
 ) {
 
 	var (
-		keyList   StringSlice
+		keyList   sort.StringSlice
 		objMerged = make(map[string][]string)
 	)
 

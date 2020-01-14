@@ -48,8 +48,12 @@ type RegisterArgs struct {
 // please use call() to send all RPCs. please don't change this
 // function.
 //
-func call(srv string, rpcname string,
-	args interface{}, reply interface{}) bool {
+func call(
+	srv string,
+	rpcname string,
+	args interface{},
+	reply interface{},
+) bool {
 	c, errx := rpc.Dial("unix", srv)
 	if errx != nil {
 		return false
