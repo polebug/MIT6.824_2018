@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -37,34 +38,43 @@ func schedule(
 		tasksList = append(tasksList, i)
 	}
 
-	for _, taskNum := range tasksList {
-		// schedule() must give each worker a sequence of tasks, one at a time
+	for len(tasksList) > 0 {
+		// use `queue` to save task list
+		taskNum := tasksList[0]
+		tasksList = append(tasksList[:0], tasksList[1:]...)
+
 		// use `sync.WaitGroup` to control goroutine
+		// make master goroutine wait until all the other goroutines have finished tasks
 		wg.Add(1)
 
-		go func(taskNum int) {
+		// `registerChan` is a blocked channel
+		// take out an worker address, it will block there
+		workerAddress := <-registerChan
+
+		go func() {
 			// use the `call()` function in `mapreduce/common_rpc.go` to send an RPC to a worker.
-			workerAddress := <-registerChan
-			doTaskArgs := DoTaskArgs{
+			response := call(workerAddress, "Worker.DoTask", DoTaskArgs{
 				JobName:       jobName,
 				File:          mapFiles[taskNum],
 				Phase:         phase,
 				TaskNumber:    taskNum,
 				NumOtherPhase: nother,
-			}
-			response := call(workerAddress, "Worker.DoTask", doTaskArgs, nil)
+			}, nil)
+
+			wg.Done()
+
 			if response {
 				// if call() returns `true`, the server responded
 				// this worker can be reused
-				wg.Done()
 				registerChan <- workerAddress
+				log.Printf("schedule call RPC \"Worker.DoTask\" succeeded! worker address = %s \n, task = %d \n", workerAddress, taskNum)
 			} else {
-				// if call() returns `false`, the server may be time out
+				// if call() returns `false`, the server may be time out or the worker is unusable
 				// the task should be put back on the tasksList
 				tasksList = append(tasksList, taskNum)
-				wg.Done()
+				log.Printf("schedule call RPC \"Worker.DoTask\" error! worker address = %s \n, task = %d \n", workerAddress, taskNum)
 			}
-		}(taskNum)
+		}()
 	}
 	wg.Wait()
 
