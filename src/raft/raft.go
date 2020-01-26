@@ -46,6 +46,9 @@ const (
 
 	// not voted
 	VOTE_NIL = -1
+
+	// rpc call timeout
+	TIMEOUT = 500 * time.Millisecond
 )
 
 // ApplyMsg
@@ -85,7 +88,6 @@ type Raft struct {
 	// use to election
 	electionST       int64 // election start timestamp
 	electionDuration int64 // election duration
-	count            int   // number of votes
 }
 
 // RequestVoteArgs define RequestVote RPC arguments structure.
@@ -120,9 +122,12 @@ type AppendEntriesReply struct {
 
 // GetState return currentTerm and whether this server believes it is the leader.
 func (rf *Raft) GetState() (term int, isleader bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	term = rf.currentTerm
 	isleader = (rf.state == LEADER)
-
+	log.Printf("[GetState] node = %v, term = %v, state = %v \n", rf.me, term, rf.state)
 	return term, isleader
 }
 
@@ -164,77 +169,6 @@ func (rf *Raft) readPersist(data []byte) {
 	// }
 }
 
-// RequestVote RPC invoked by candidates to gather votes
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Receiver implementation, reference raft paper's Figure 2:
-	// 1. Reply false if args.term < rf.currentTerm (§5.1)
-	// 2. If rf.votedFor is null or rf.candidateId, and candidate’s log is at
-	// least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
-	reply.Term = rf.currentTerm
-
-	if args.Term < rf.currentTerm {
-		reply.VoteGranted = false
-		return
-	}
-
-	if args.Term > rf.currentTerm {
-		var state = rf.state
-		rf.SetFollower(args.Term)
-		if state == LEADER {
-			go rf.StartElectionTimeOut()
-		}
-	}
-
-	if rf.votedFor == VOTE_NIL || rf.votedFor == args.CandidateID {
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateID
-		rf.state = FOLLOWER
-		rf.InitElectionConf()
-		return
-	}
-}
-
-// SendRequestVote send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// look at the comments in ../labrpc/labrpc.go for more details.
-func (rf *Raft) SendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	log.Printf("[raft RequestVote RPC]: candidate = %v, current_term = %v, req_node = %v, reply_voteGranted = %v \n", rf.me, rf.currentTerm, server, reply.VoteGranted)
-	return ok
-}
-
-// AppendEntries RPC Invoked by leader to replicate log entries (§5.3); also used as heartbeat (§5.2).
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	// Receiver implementation, reference raft paper's Figure 2:
-	// 1. Reply false if term < currentTerm (§5.1)
-	// 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-	// 3. If an existing entry conflicts with a new one (same index but different terms),
-	// delete the existing entry and all that follow it (§5.3)
-	// 4. Append any new entries not already in the log
-	// 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	reply.Term = rf.currentTerm
-
-	if args.Term < rf.currentTerm {
-		reply.Success = false
-		return
-	}
-
-	if rf.state != FOLLOWER {
-		rf.SetFollower(args.Term)
-	}
-
-	reply.Success = true
-}
-
-// SendAppendEntries send a AppendEntries RPC to a server.
-func (rf *Raft) SendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	return ok
-}
-
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -271,19 +205,17 @@ func (rf *Raft) Kill() {
 
 // SetFollower set the peer into Follower
 func (rf *Raft) SetFollower(term int) {
-	log.Printf("[raft set Follower]: node = %v becomes Follower, current_term = %v \n", rf.me, rf.currentTerm)
-
 	rf.state = FOLLOWER
 	rf.votedFor = VOTE_NIL
 	rf.currentTerm = term
+
 	rf.InitElectionConf()
+	// log.Printf("[State]: node = %v becomes Follower, current_term = %v \n", rf.me, rf.currentTerm)
 	return
 }
 
 // SetCandidate set the peer into Candidate
 func (rf *Raft) SetCandidate() {
-	log.Printf("[raft set Candidate]: node = %v becomes Candidate, current_term = %v \n", rf.me, rf.currentTerm)
-
 	// 1. transitions to candidate state
 	rf.state = CANDIDATE
 
@@ -292,19 +224,109 @@ func (rf *Raft) SetCandidate() {
 
 	// 3. votes for itself
 	rf.votedFor = rf.me
-	rf.count = 1
 
 	rf.InitElectionConf()
+	// log.Printf("[State]: node = %v becomes Candidate, current_term = %v \n", rf.me, rf.currentTerm)
 	return
 }
 
 // SetLeader set the peer into Leader
 func (rf *Raft) SetLeader() {
-	log.Printf("[raft set Leader]: node = %v becomes Leader, current_term = %v \n", rf.me, rf.currentTerm)
-
 	rf.state = LEADER
 	rf.InitElectionConf()
+	// log.Printf("[State]: node = %v becomes Leader, current_term = %v \n", rf.me, rf.currentTerm)
 	return
+}
+
+// RequestVote RPC invoked by candidates to gather votes
+func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
+	// Receiver implementation, reference raft paper's Figure 2:
+	// 1. Reply false if args.term < rf.currentTerm (§5.1)
+	// 2. If rf.votedFor is null or rf.candidateId, and candidate’s log is at
+	// least as up-to-date as receiver’s log, grant vote (§5.2, §5.4)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	// log.Printf("[State]: node = %v, state = %d, current_term = %v \n", rf.me, rf.state, rf.currentTerm)
+
+	reply.Term = rf.currentTerm
+	reply.VoteGranted = false
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	if args.Term > rf.currentTerm {
+		rf.SetFollower(args.Term)
+	}
+
+	if rf.votedFor == VOTE_NIL || rf.votedFor == args.CandidateID {
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateID
+		rf.state = FOLLOWER
+		rf.InitElectionConf()
+		return
+	}
+}
+
+// SendRequestVote send a RequestVote RPC to a server.
+// server is the index of the target server in rf.peers[].
+// look at the comments in ../labrpc/labrpc.go for more details.
+func (rf *Raft) SendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+	var okCh = make(chan bool)
+
+	go func() {
+		var ok = rf.peers[server].Call("Raft.RequestVote", args, reply)
+		// log.Printf("[RequestVote RPC]: candidate = %v, term = %v, req_node = %v, reply = %v | %v,  \n", rf.me, rf.currentTerm, server, ok,reply)
+		okCh <- ok
+	}()
+
+	select {
+	case <-time.After(TIMEOUT):
+		return false
+	case <-okCh:
+		return true
+	}
+}
+
+// AppendEntries RPC Invoked by leader to replicate log entries (§5.3); also used as heartbeat (§5.2).
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	// Receiver implementation, reference raft paper's Figure 2:
+	// 1. Reply false if term < currentTerm (§5.1)
+	// 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+	// 3. If an existing entry conflicts with a new one (same index but different terms),
+	// delete the existing entry and all that follow it (§5.3)
+	// 4. Append any new entries not already in the log
+	// 5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	reply.Term = rf.currentTerm
+	reply.Success = false
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	rf.SetFollower(args.Term)
+	reply.Success = true
+}
+
+// SendAppendEntries send a AppendEntries RPC to a server.
+func (rf *Raft) SendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	var okCh = make(chan bool)
+
+	go func() {
+		ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+		// log.Printf("[AppendEntries RPC]: leader = %v, term = %v, req_node = %v, reply = %v | %v \n", rf.me, rf.currentTerm, server, ok, reply)
+		okCh <- ok
+	}()
+
+	select {
+	case <-time.After(TIMEOUT):
+		return false
+	case <-okCh:
+		return true
+	}
 }
 
 // InitElectionConf initial election start timestamp, duration, number of votes
@@ -314,128 +336,10 @@ func (rf *Raft) InitElectionConf() {
 	// Because the tester limits you to 10 heartbeats per second, you will have to use an election timeout larger than the paper's 150 to 300 milliseconds,
 	// but not too large, because then you may fail to elect a leader within five seconds.
 	rf.electionST = time.Now().UnixNano() / int64(time.Millisecond)
-	rf.electionDuration = rand.Int63n(300) + 500
-	rf.count = 0
+	rf.electionDuration = rand.Int63n(5)*100 + 300
 }
 
-// SendHeartBeat new `Leader` sends heartbeat messages to all of the other servers
-// to establish its authority and prevent new elections.
-func (rf *Raft) SendHeartBeat() {
-	for {
-		if rf.state != LEADER {
-			return
-		}
-
-		for idxPeer := range rf.peers {
-			if idxPeer == rf.me {
-				rf.InitElectionConf()
-				continue
-			}
-
-			go func(server int) {
-				// send initial empty AppendEntries RPCs (heartbeat) to each server;
-				// repeat during idle periods to prevent election timeouts
-				for {
-					rf.mu.Lock()
-					var (
-						appendReq = AppendEntriesArgs{
-							LeaderID:     rf.me,
-							Term:         rf.currentTerm,
-							PrevLogIndex: 0,
-							PrevLogTerm:  0,
-							Logs:         nil,
-						}
-						appendResp = AppendEntriesReply{}
-					)
-
-					// log.Printf("[raft heartbeat]: leader = %v, term = %v, server = %v", rf.me, rf.currentTerm, server)
-					rf.SendAppendEntries(server, &appendReq, &appendResp)
-
-					if appendResp.Term > rf.currentTerm {
-						rf.SetFollower(appendResp.Term)
-						rf.mu.Unlock()
-						return
-					}
-
-					rf.mu.Unlock()
-				}
-			}(idxPeer)
-		}
-	}
-	time.Sleep(time.Duration(100) * time.Millisecond)
-}
-
-// StartElection Candidate start election
-func (rf *Raft) StartElection() {
-	log.Printf("[raft election]: node = %v start\n", rf.me)
-
-	// According to the paper. begin an election:
-	// 1. transitions to candidate state.
-	rf.mu.Lock()
-	rf.SetCandidate()
-
-	// 2. issues `RequestVote RPCs in parallel` to each of the other servers in the cluster.
-	var voteReq = RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateID: rf.me,
-	}
-	rf.mu.Unlock()
-
-	for idxPeer := range rf.peers {
-		if idxPeer == rf.me {
-			continue
-		}
-
-		go func(server int, voteReq RequestVoteArgs) {
-			var voteResp = RequestVoteReply{}
-			if ok := rf.SendRequestVote(server, &voteReq, &voteResp); ok {
-				rf.mu.Lock()
-
-				// 3. A candidate continues in this state until one of three things happens:
-				// (a) it wins the election,
-				// (b) another server establishes itself as leader, or
-				// (c) a period of time goes by with no winner.
-
-				// (a) results occur
-				// A candidate wins an election if it receives votes from a majority of the servers in the full
-				// cluster for the same term. Each server will vote for at most one candidate in a given term,
-				// on a first-come-first-served basis. The majority rule ensures that at most one candidate can win the
-				// election for a particular term (the Election Safety Property in Figure 3).
-				// Once a candidate wins an election, it becomes `Leader`.
-				if voteResp.VoteGranted && voteReq.Term == rf.currentTerm {
-					// receive a vote successful
-					rf.count++
-
-					if rf.count >= len(rf.peers)/2 {
-						rf.SetLeader()
-						rf.mu.Unlock()
-
-						// After being `Leader`, it then sends heartbeat messages to all of
-						// the other servers to establish its authority and prevent new elections.
-						go rf.SendHeartBeat()
-						return
-					}
-				}
-
-				// (b) results occur
-				// If the leader’s term (another server claiming to be leader) is at least
-				// as large as the candidate’s current term, then the `Candidate`
-				// recognizes the leader as legitimate and returns to `Follower` state.
-				if voteResp.Term > rf.currentTerm {
-					rf.SetFollower(voteResp.Term)
-					rf.mu.Unlock()
-
-					go rf.StartElectionTimeOut()
-					return
-				}
-
-				rf.mu.Unlock()
-			}
-		}(idxPeer, voteReq)
-	}
-}
-
-// StartElectionTimeOut Followers election time out
+// ElectionTimeOut Followers election time out
 // Raft uses randomized election timeouts to ensure that split votes are rare
 // and that they are resolved quickly. To prevent split votes in the first place,
 // election timeouts are chosen randomly from a fixed interval (e.g., 150–300ms).
@@ -444,7 +348,7 @@ func (rf *Raft) StartElection() {
 // The same mechanism is used to handle split votes. Each candidate restarts its randomized
 // election timeout at the start of an election, and it waits for that timeout to elapse before
 // starting the next election; this reduces the likelihood of another split vote in the new election.
-func (rf *Raft) StartElectionTimeOut() {
+func (rf *Raft) ElectionTimeOut() {
 	for {
 		// According to rf.electionST and rf.electionDuration,
 		// judge whether the election is timed out every 10 milliseconds
@@ -460,13 +364,159 @@ func (rf *Raft) StartElectionTimeOut() {
 
 	// After the election timeout,
 	// if the current node is Follower or Canidate, enter the election stage
+	rf.mu.Lock()
 	if rf.state == FOLLOWER || rf.state == CANDIDATE {
-		rf.mu.Lock()
-		rf.SetCandidate()
 		rf.mu.Unlock()
-
 		rf.StartElection()
 		return
+	}
+	rf.mu.Unlock()
+}
+
+// StartElection Candidate start election
+// According to the paper. begin an election:
+// 1. transitions to candidate state.
+// 2. issues `RequestVote RPCs in parallel` to each of the other servers in the cluster.
+// 3. A candidate continues in this state until one of three things happens:
+// (a) it wins the election,
+// (b) another server establishes itself as leader, or
+// (c) a period of time goes by with no winner.
+func (rf *Raft) StartElection() {
+	// log.Printf("[Election]: node = %v start\n", rf.me)
+
+	rf.mu.Lock()
+	rf.SetCandidate()
+
+	var (
+		relyCh = make(chan RequestVoteReply, len(rf.peers))
+		wg     sync.WaitGroup
+		count  = 1
+	)
+
+	var voteReq = RequestVoteArgs{
+		Term:        rf.currentTerm,
+		CandidateID: rf.me,
+	}
+	rf.mu.Unlock()
+
+	for idxPeer := range rf.peers {
+		if idxPeer == rf.me {
+			rf.InitElectionConf()
+			continue
+		}
+
+		wg.Add(1)
+		go func(server int, voteReq RequestVoteArgs) {
+			defer wg.Done()
+
+			var voteResp = RequestVoteReply{}
+			if ok := rf.SendRequestVote(server, &voteReq, &voteResp); ok {
+				relyCh <- voteResp
+			}
+		}(idxPeer, voteReq)
+	}
+
+	go func() {
+		wg.Wait()
+		close(relyCh)
+	}()
+
+	for resp := range relyCh {
+		rf.mu.Lock()
+		// 3.(a) results occur
+		// A candidate wins an election if it receives votes from a majority of the servers in the full
+		// cluster for the same term. Each server will vote for at most one candidate in a given term,
+		// on a first-come-first-served basis. The majority rule ensures that at most one candidate can win the
+		// election for a particular term (the Election Safety Property in Figure 3).
+		// Once a candidate wins an election, it becomes `Leader`.
+		if resp.VoteGranted {
+			// receive a vote successful
+			count++
+
+			if count > len(rf.peers)/2 {
+				rf.SetLeader()
+				rf.mu.Unlock()
+
+				// After being `Leader`, it then sends heartbeat messages to all of
+				// the other servers to establish its authority and prevent new elections.
+				go rf.SendHeartBeat()
+				return
+			}
+		}
+
+		// (b) results occur
+		// If the leader’s term (another server claiming to be leader) is at least
+		// as large as the candidate’s current term, then the `Candidate`
+		// recognizes the leader as legitimate and returns to `Follower` state.
+		if resp.Term > rf.currentTerm {
+			rf.SetFollower(resp.Term)
+			rf.mu.Unlock()
+			go rf.ElectionTimeOut()
+			return
+		}
+		rf.mu.Unlock()
+	}
+
+	// (c) results occur
+	// The third possible outcome is that a candidate neither wins nor loses the election:
+	// if many followers become candidates at the same time, votes could be split so that
+	// no candidate obtains a majority. When this happens, each candidate will time out and
+	// start a new election by incrementing its term and initiating another round of RequestVote RPCs.
+	log.Println("[WARNING] split vote!")
+	rf.mu.Lock()
+	rf.SetFollower(rf.currentTerm)
+	rf.mu.Unlock()
+	go rf.ElectionTimeOut()
+}
+
+// SendHeartBeat new `Leader` sends heartbeat messages to all of the other servers
+// to establish its authority and prevent new elections.
+func (rf *Raft) SendHeartBeat() {
+	for true {
+		for idxPeer := range rf.peers {
+			rf.mu.Lock()
+			if rf.state != LEADER {
+				rf.mu.Unlock()
+				return
+			}
+
+			if idxPeer == rf.me {
+				rf.InitElectionConf()
+				rf.mu.Unlock()
+				continue
+			}
+			rf.mu.Unlock()
+
+			go func(server int) {
+				// send initial empty AppendEntries RPCs (heartbeat) to each server;
+				// repeat during idle periods to prevent election timeouts
+				rf.mu.Lock()
+				if rf.state != LEADER {
+					rf.mu.Unlock()
+					return
+				}
+				var (
+					appendReq = AppendEntriesArgs{
+						LeaderID: rf.me,
+						Term:     rf.currentTerm,
+					}
+					appendResp = AppendEntriesReply{}
+				)
+				rf.mu.Unlock()
+
+				rf.SendAppendEntries(server, &appendReq, &appendResp)
+
+				rf.mu.Lock()
+				if appendResp.Term > rf.currentTerm {
+					rf.SetFollower(appendResp.Term)
+					rf.mu.Unlock()
+					go rf.ElectionTimeOut()
+					return
+				}
+				rf.mu.Unlock()
+			}(idxPeer)
+		}
+		time.Sleep(time.Duration(100) * time.Millisecond)
 	}
 }
 
@@ -483,7 +533,6 @@ func Make(
 	rf.persister = persister
 	rf.me = me
 
-	log.Printf("[raft Make()]: create port = %v \n", me)
 	rf.SetFollower(0)
 	rf.logs = make([]LogEntry, 0)
 
@@ -494,7 +543,7 @@ func Make(
 	rf.matchIndex = make([]int, len(peers))
 
 	// create a background goroutine that will kick off leader election periodically
-	go rf.StartElectionTimeOut()
+	go rf.ElectionTimeOut()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
