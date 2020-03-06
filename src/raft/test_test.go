@@ -49,6 +49,8 @@ func TestInitialElection2A(t *testing.T) {
 	cfg.end()
 }
 
+// TestReElection2A: leader1发生网络分区 -> 选举出leader2 -> leader1网络恢复，不打扰leader2 ->
+// leader2和另一节点发生网络分区 -> 无法选出新的leader -> 其中一个节点恢复正常 -> 选举出新的leader
 func TestReElection2A(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
@@ -98,11 +100,14 @@ func TestBasicAgree2B(t *testing.T) {
 
 	iters := 3
 	for index := 1; index < iters+1; index++ {
+		// fmt.Println("info: check no committed before Start()")
 		nd, _ := cfg.nCommitted(index)
 		if nd > 0 {
 			t.Fatalf("some have committed before Start()")
 		}
 
+		// add one command
+		// fmt.Println("info: add one command")
 		xindex := cfg.one(index*100, servers, false)
 		if xindex != index {
 			t.Fatalf("got index %v but expected %v", xindex, index)
@@ -112,6 +117,8 @@ func TestBasicAgree2B(t *testing.T) {
 	cfg.end()
 }
 
+// TestFailAgree2B: 一个非leader节点发生网络分区 -> 其余节点能继续commit, apply -> 该节点网络恢复正常 ->
+// 更新日志
 func TestFailAgree2B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false)
