@@ -10,7 +10,7 @@ func (rf *Raft) GetState() (term int, isleader bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	term = rf.currentTerm
+	term = rf.CurrentTerm
 	isleader = (rf.state == LEADER)
 	// log.Printf("[GetState] node = %v, term = %v, state = %v \n", rf.me, term, rf.state)
 	return term, isleader
@@ -29,14 +29,16 @@ func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if isLeader = (rf.state == LEADER); isLeader {
-		term = rf.currentTerm
-		index = len(rf.logs) // initialized to 1
-		rf.logs = append(rf.logs, LogEntry{
+		term = rf.CurrentTerm
+		index = len(rf.Logs) // initialized to 1
+		rf.Logs = append(rf.Logs, LogEntry{
 			Command: command,
 			Term:    term,
 		})
-		rf.matchIndex[rf.me] = len(rf.logs) - 1
-		rf.nextIndex[rf.me] = len(rf.logs)
+		// log.Printf("[Start]: log = %v \n", rf.Logs)
+		rf.matchIndex[rf.me] = len(rf.Logs) - 1
+		rf.nextIndex[rf.me] = len(rf.Logs)
+		rf.persist()
 	}
 
 	return index, term, isLeader
@@ -49,44 +51,6 @@ func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) 
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
-}
-
-//
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-//
-func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
-}
-
-//
-// restore previously persisted state.
-//
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 }
 
 // Make create a Raft server
@@ -104,15 +68,20 @@ func Make(
 	rf.me = me
 
 	rf.SetFollower(0)
-	rf.logs = make([]LogEntry, 1)
+	rf.Logs = make([]LogEntry, 1)
 
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.applyCh = applyCh
+
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+
 	rf.matchIndex = make([]int, len(peers))
 	rf.nextIndex = make([]int, len(peers))
+
 	for i := 0; i < len(peers); i++ {
-		rf.nextIndex[i] = 1
+		rf.nextIndex[i] = len(rf.Logs)
 	}
 	rf.mu.Unlock()
 
@@ -120,9 +89,6 @@ func Make(
 	go rf.ElectionTimeOut()
 	// check committed logs in real time and apply commands to the state machined
 	go rf.WaitCmdApplied()
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
 
 	return rf
 }

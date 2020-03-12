@@ -51,14 +51,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 	// log.Printf("[State]: node = %v, state = %d, current_term = %v \n", rf.me, rf.state, rf.currentTerm)
 
-	reply.Term = rf.currentTerm
+	reply.Term = rf.CurrentTerm
 	reply.VoteGranted = false
 
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.CurrentTerm {
 		return
 	}
 
-	if args.Term > rf.currentTerm {
+	if args.Term > rf.CurrentTerm {
 		rf.SetFollower(args.Term)
 	}
 
@@ -68,19 +68,21 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// check up-to-date:
 	// (1). if the logs have last entries with different terms, then the log with the later term is more up-to-date.
 	// (2). if the logs end with the same term, then whichever log is longer is more up-to-date.
-	lastLogTerm := rf.logs[len(rf.logs)-1].Term
+	lastLogTerm := rf.Logs[len(rf.Logs)-1].Term
 	if lastLogTerm > args.LastLogTerm {
 		return
 	}
-	if lastLogTerm == args.LastLogTerm && len(rf.logs)-1 > args.LastLogIndex {
+	if lastLogTerm == args.LastLogTerm && len(rf.Logs)-1 > args.LastLogIndex {
 		return
 	}
 
-	if rf.votedFor == VOTE_NIL || rf.votedFor == args.CandidateID {
+	if rf.VotedFor == VOTE_NIL || rf.VotedFor == args.CandidateID {
 		// grant vote
 		reply.VoteGranted = true
-		rf.votedFor = args.CandidateID
+		rf.VotedFor = args.CandidateID
 		rf.state = FOLLOWER
+
+		rf.persist()
 		rf.InitElectionConf()
 		return
 	}
@@ -121,18 +123,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	reply.Term = rf.currentTerm
+	reply.Term = rf.CurrentTerm
 	reply.Success = false
 
-	if args.Term < rf.currentTerm {
+	if args.Term < rf.CurrentTerm {
 		return
 	}
 
 	rf.SetFollower(args.Term)
 
 	// Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
-	var prevLogIndex = len(rf.logs) - 1
-	if prevLogIndex < args.PrevLogIndex || rf.logs[args.PrevLogIndex].Term != args.PrevLogTerm {
+	var prevLogIndex = len(rf.Logs) - 1
+	if prevLogIndex < args.PrevLogIndex || rf.Logs[args.PrevLogIndex].Term != args.PrevLogTerm {
 		// miss log
 		// log.Printf("[AppendEntries RPC]: server = %v, prevLogIndex = %v, leader match prevLogIndex = %v, miss log !\n", rf.me, prevLogIndex, args.PrevLogIndex)
 		return
@@ -143,17 +145,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	for i, entry := range args.Logs {
 		index := args.PrevLogIndex + i + 1
 		// term conflict, delete follower's log, overwrite it
-		if index <= prevLogIndex && rf.logs[index].Term != entry.Term {
+		if index <= prevLogIndex && rf.Logs[index].Term != entry.Term {
 			// log.Printf("[AppendEntries RPC]: server = %v, fix conflict log %v -> %v \n", rf.me, rf.logs[index], entry)
 			commitIndex = index
-			rf.logs[index] = entry
+			rf.Logs[index] = entry
 		}
 
 		// Append any new entries not already in the log
 		if index > prevLogIndex {
-			// log.Printf("[AppendEntries RPC]: server = %v, log = %v append = %v \n", rf.me, rf.logs, entry)
-			rf.logs = append(rf.logs, entry)
-			commitIndex = len(rf.logs) - 1
+			// log.Printf("[AppendEntries RPC]: server = %v, log = %v append = %v \n", rf.me, rf.Logs, entry)
+			rf.Logs = append(rf.Logs, entry)
+			commitIndex = len(rf.Logs) - 1
 		}
 	}
 
@@ -162,6 +164,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = min(args.LeaderCommit, commitIndex)
 	}
 
+	rf.persist()
 	reply.Success = true
 	// log.Printf("[AppendEntries RPC]: server = %v, logs = %v, rf.commitIndex = %v \n", rf.me, rf.logs, rf.commitIndex)
 }

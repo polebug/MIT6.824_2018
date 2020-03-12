@@ -2,7 +2,7 @@ package labrpc
 
 const (
 	OK = iota
-	CANCELLED 
+	CANCELLED
 	UNKNOWN
 	INVALID_ARGUMENT
 	DEADLINE_EXCEEDED
