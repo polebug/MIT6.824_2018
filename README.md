@@ -10,6 +10,12 @@ The passing of labs is as follows:
     - [x] Part V: inverted index generation
 
 - [x] Lab2: [Raft](http://nil.csail.mit.edu/6.824/2018/labs/lab-raft.html)
-    - [x] Part 2A: leader election and heartbeats 
-    - [x] Part 2B: keep a consistent, replicated log of operations 
+    - [x] Part 2A: leader election and heartbeats [(note)](https://github.com/polebug/MIT6.824_2018/wiki/Lab2A-Raft:-leader-election-and-heartbeat)
+    - [x] Part 2B: keep a consistent, replicated log of operations [(note)](https://github.com/polebug/MIT6.824_2018/wiki/Lab2B-Raft:-log-replication)
     - [x] Part 2C: persist
+
+
+Reference:
+1. [MapReduce paper](http://nil.csail.mit.edu/6.824/2018/papers/mapreduce.pdf)
+2. [Raft paper](http://nil.csail.mit.edu/6.824/2018/papers/raft-extended.pdf)
+3. [GFS paper](http://nil.csail.mit.edu/6.824/2018/papers/gfs.pdf)
