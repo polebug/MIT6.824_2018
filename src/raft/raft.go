@@ -253,7 +253,7 @@ func (rf *Raft) StartElection() {
 			defer wg.Done()
 
 			var voteResp = RequestVoteReply{}
-			if response := rf.SendRequestVote(server, &voteReq, &voteResp); response == labrpc.OK {
+			if response := rf.SendRPCHandler(server, "Raft.RequestVote", &voteReq, &voteResp); response == labrpc.OK {
 				relyCh <- voteResp
 			}
 		}(idxPeer, voteReq)
@@ -357,7 +357,7 @@ func (rf *Raft) Broadcast() {
 				)
 
 				// need to sync new logs to thie server
-				if nextIndex < len(rf.Logs) {
+				if nextIndex > 0 && nextIndex < len(rf.Logs) {
 					// log.Printf("need to sync new logs, len(rf.logs) = %v, nextIndex = %v \n", len(rf.Logs), nextIndex)
 					prevLogIndex := nextIndex - 1
 					appendReq.PrevLogIndex = prevLogIndex
@@ -366,7 +366,7 @@ func (rf *Raft) Broadcast() {
 				}
 				rf.mu.Unlock()
 
-				if response := rf.SendAppendEntries(server, &appendReq, &appendResp); response == labrpc.OK {
+				if response := rf.SendRPCHandler(server, "Raft.AppendEntries", &appendReq, &appendResp); response == labrpc.OK {
 					rf.mu.Lock()
 					if appendResp.Term > rf.CurrentTerm {
 						rf.SetFollower(appendResp.Term)

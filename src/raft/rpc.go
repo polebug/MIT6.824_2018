@@ -1,14 +1,9 @@
 package raft
 
 import (
-	"labrpc"
+	rpc "labrpc"
 	// "log"
 	"time"
-)
-
-const (
-	// rpc call timeout
-	RPC_TIMEOUT = 500 * time.Millisecond
 )
 
 // RequestVoteArgs define RequestVote RPC arguments structure.
@@ -88,29 +83,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 }
 
-// SendRequestVote send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// look at the comments in ../labrpc/labrpc.go for more details.
-func (rf *Raft) SendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) int {
-	var okCh = make(chan bool)
-
-	go func() {
-		var ok = rf.peers[server].Call("Raft.RequestVote", args, reply)
-		// log.Printf("[RequestVote RPC]: candidate = %v, term = %v, req_node = %v, reply = %v | %v,  \n", rf.me, rf.currentTerm, server, ok, reply)
-		okCh <- ok
-	}()
-
-	select {
-	case <-time.After(RPC_TIMEOUT):
-		return labrpc.DEADLINE_EXCEEDED
-	case ok := <-okCh:
-		if ok {
-			return labrpc.OK
-		}
-		return labrpc.UNAVAILABLE
-	}
-}
-
 // AppendEntries RPC Invoked by leader to replicate log entries (§5.3); also used as heartbeat (§5.2).
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	// Receiver implementation, reference raft paper's Figure 2:
@@ -169,23 +141,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// log.Printf("[AppendEntries RPC]: server = %v, logs = %v, rf.commitIndex = %v \n", rf.me, rf.logs, rf.commitIndex)
 }
 
-// SendAppendEntries send a AppendEntries RPC to a server.
-func (rf *Raft) SendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) int {
+// SendRPCHandler send RPC request
+func (rf *Raft) SendRPCHandler(server int, method string, args interface{}, reply interface{}) rpc.Code {
 	var okCh = make(chan bool)
 
 	go func() {
-		ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-		// log.Printf("[AppendEntries RPC]: leader = %v, term = %v, req_node = %v, reply = %v | %v \n", rf.me, rf.currentTerm, server, ok, reply)
+		var ok = rf.peers[server].Call(method, args, reply)
 		okCh <- ok
 	}()
 
 	select {
-	case <-time.After(RPC_TIMEOUT):
-		return labrpc.DEADLINE_EXCEEDED
+	case <-time.After(rpc.RPC_TIMEOUT):
+		return rpc.DEADLINE_EXCEEDED
 	case ok := <-okCh:
 		if ok {
-			return labrpc.OK
+			return rpc.OK
 		}
-		return labrpc.UNAVAILABLE
+		return rpc.UNAVAILABLE
 	}
 }
