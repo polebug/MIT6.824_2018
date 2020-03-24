@@ -2,6 +2,7 @@ package raft
 
 import (
 	"labrpc"
+	"log"
 	// "log"
 )
 
@@ -30,27 +31,23 @@ func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) 
 	defer rf.mu.Unlock()
 	if isLeader = (rf.state == LEADER); isLeader {
 		term = rf.CurrentTerm
-		index = len(rf.Logs) // initialized to 1
 		rf.Logs = append(rf.Logs, LogEntry{
 			Command: command,
 			Term:    term,
 		})
-		// log.Printf("[Start]: log = %v \n", rf.Logs)
-		rf.matchIndex[rf.me] = len(rf.Logs) - 1
-		rf.nextIndex[rf.me] = len(rf.Logs)
+		index = len(rf.Logs) + rf.LastIncludedIndex - 1
+		// log.Printf("[Start]: leader = %v, log = %v \n", rf.me, rf.Logs)
+		rf.matchIndex[rf.me] = index
+		rf.nextIndex[rf.me] = index + 1
 		rf.persist()
 	}
 
 	return index, term, isLeader
 }
 
-// the tester calls Kill() when a Raft instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
+// Kill the tester calls Kill() when a Raft instance won't be needed again.
 func (rf *Raft) Kill() {
-	// Your code here, if desired.
+	// log.Println("raft kill")
 }
 
 // Make create a Raft server
@@ -60,6 +57,7 @@ func Make(
 	persister *Persister, // is a place for this server to save its persistent state, and also initially holds the most recent saved state
 	applyCh chan ApplyMsg, // a channel on which the tester or service expects Raft to send ApplyMsg messages
 ) *Raft {
+	log.Println("make")
 	// initialization
 	rf := &Raft{}
 	rf.mu.Lock()
@@ -73,16 +71,18 @@ func Make(
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.applyCh = applyCh
+	rf.LastIncludedIndex = 0
+	rf.LastIncludedTerm = 0
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	rf.matchIndex = make([]int, len(peers))
 	rf.nextIndex = make([]int, len(peers))
-
 	for i := 0; i < len(peers); i++ {
-		rf.nextIndex[i] = len(rf.Logs)
+		rf.nextIndex[i] = len(rf.Logs) + rf.LastIncludedIndex
 	}
+
 	rf.mu.Unlock()
 
 	// create a background goroutine that will kick off leader election periodically

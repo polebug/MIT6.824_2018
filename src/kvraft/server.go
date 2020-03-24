@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"labgob"
 	"labrpc"
 	"log"
@@ -39,10 +40,13 @@ type KVServer struct {
 	me           int
 	rf           *raft.Raft
 	applyCh      chan raft.ApplyMsg
-	maxraftstate int               // snapshot if log grows this big
-	db           map[string]string // kv
-	lastSeqTable map[int64]int64   // client latest request seq, igonre old requests
-	agreeCh      map[int]chan Op   // agreed op
+	persister    *raft.Persister
+	maxraftstate int             // snapshot if log grows this big
+	agreeCh      map[int]chan Op // agreed op
+
+	// persist:
+	DB           map[string]string // kv
+	LastSeqTable map[int64]int64   // client latest request seq, igonre old requests
 }
 
 type GetArgs struct {
@@ -93,7 +97,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		if kv.isEqual(op, command) {
 			reply.WrongLeader = false
 			kv.mu.Lock()
-			reply.Value = kv.db[args.Key]
+			reply.Value = kv.DB[args.Key]
 			kv.mu.Unlock()
 			return
 		}
@@ -130,18 +134,14 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 }
 
-//
-// the tester calls Kill() when a KVServer instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
+// Kill the tester calls Kill() when a KVServer instance won't
+// be needed again.
 func (kv *KVServer) Kill() {
+	// log.Println("kv kill")
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
-// getAgreedCmd
+// GetAgreedCmd
 func (kv *KVServer) GetAgreedCmd(index int) chan Op {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -158,31 +158,101 @@ func (kv *KVServer) UpdateAgreedCmd(index int, op Op) {
 	// log.Printf("update agree ch = %v \n", op)
 }
 
-// UpdateDB
-func (kv *KVServer) UpdateDB() {
+// WaitApplyCh
+func (kv *KVServer) WaitApplyCh() {
 	for {
-		if msg := <-kv.applyCh; msg.CommandValid {
-			if msg.CommandValid == false {
-				continue
-			}
-			// log.Printf("apply cmd = %v \n", msg)
-			op := msg.Command.(Op)
+		kv.mu.Lock()
 
-			kv.mu.Lock()
-			if seq, ok := kv.lastSeqTable[op.Client.ID]; !ok || seq < op.Client.Seq {
-				kv.lastSeqTable[op.Client.ID] = op.Client.Seq
-				switch op.Type {
-				case "Put":
-					kv.db[op.Key] = op.Value
-				case "Append":
-					kv.db[op.Key] += op.Value
-				}
-			}
+		msg := <-kv.applyCh
+		if msg.CommandValid == false {
 			kv.mu.Unlock()
-
-			kv.UpdateAgreedCmd(msg.CommandIndex, op)
+			kv.ReadSnapshot(msg.Command.([]byte))
+			continue
 		}
+		// log.Printf("kv apply cmd = %v \n", msg)
+		op := msg.Command.(Op)
+
+		if seq, ok := kv.LastSeqTable[op.Client.ID]; !ok || seq < op.Client.Seq {
+			kv.LastSeqTable[op.Client.ID] = op.Client.Seq
+			switch op.Type {
+			case "Put":
+				kv.DB[op.Key] = op.Value
+			case "Append":
+				kv.DB[op.Key] += op.Value
+			case "Get":
+			default:
+				panic("unknown method")
+			}
+		}
+		kv.mu.Unlock()
+
+		kv.UpdateAgreedCmd(msg.CommandIndex, op)
+
+		// check raft log size
+		kv.CheckRaftSize(msg.CommandIndex)
+
+		time.Sleep(time.Duration(10) * time.Millisecond)
 	}
+}
+
+// CheckRaftSize compare `maxraftstate` to `persister.RaftStateSize()`. Whenever kv server detects that
+// the Raft state size is approaching this threshold, it will save a snapshot.
+func (kv *KVServer) CheckRaftSize(index int) {
+	kv.mu.Lock()
+	// if maxraftstate is -1, you do not have to snapshot
+	if kv.maxraftstate == -1 {
+		kv.mu.Unlock()
+		return
+	}
+
+	if kv.persister.RaftStateSize() >= kv.maxraftstate {
+		kv.mu.Unlock()
+		kv.SaveSnapshot(index)
+		return
+	}
+	kv.mu.Unlock()
+}
+
+// SaveSnapshot save snapshot
+func (kv *KVServer) SaveSnapshot(index int) {
+	kv.mu.Lock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	if err := e.Encode(kv.DB); err != nil {
+		panic(err)
+	}
+	if err := e.Encode(kv.LastSeqTable); err != nil {
+		panic(err)
+	}
+	kv.mu.Unlock()
+
+	// tell Raft that it can save snapshot and discard old log entries
+	kv.rf.SaveSnapshot(index, w.Bytes())
+}
+
+// ReadSnapshot read snapshot
+func (kv *KVServer) ReadSnapshot(snapshot []byte) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	if snapshot == nil || len(snapshot) < 1 {
+		return
+	}
+
+	var (
+		db           map[string]string
+		lastSeqTable map[int64]int64
+	)
+
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	if d.Decode(&db) != nil || d.Decode(&lastSeqTable) != nil {
+		log.Printf("ERROR: ReadSnapshot() decode failed! data = %v \n", string(snapshot))
+		return
+	}
+
+	kv.DB = db
+	kv.LastSeqTable = lastSeqTable
 }
 
 //
@@ -210,13 +280,15 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.persister = persister
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-	kv.db = make(map[string]string)
-	kv.lastSeqTable = make(map[int64]int64)
+	kv.DB = make(map[string]string)
+	kv.LastSeqTable = make(map[int64]int64)
 	kv.agreeCh = make(map[int]chan Op)
 	kv.mu.Unlock()
 
-	go kv.UpdateDB()
+	kv.ReadSnapshot(kv.persister.ReadSnapshot())
+	go kv.WaitApplyCh()
 
 	return kv
 }
