@@ -179,6 +179,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 
 	cfg.begin(title)
 
+	// 建立连接，创建一个 clerk 对象
 	ck := cfg.makeClient(cfg.All())
 
 	done_partitioner := int32(0)
@@ -228,7 +229,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
 		if partitions {
-			// log.Printf("wait for partitioner\n")
+			log.Printf("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
 			// have submitted a request in a minority.  That request
@@ -240,7 +241,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		}
 
 		if crash {
-			// log.Printf("shutdown servers\n")
+			log.Printf("shutdown servers\n")
 			for i := 0; i < nservers; i++ {
 				cfg.ShutdownServer(i)
 			}

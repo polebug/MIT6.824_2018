@@ -1,7 +1,13 @@
 package labrpc
 
+import (
+	"time"
+)
+
+type Code int
+
 const (
-	OK = iota
+	OK Code = iota
 	CANCELLED
 	UNKNOWN
 	INVALID_ARGUMENT
@@ -18,4 +24,6 @@ const (
 	INTERNAL
 	UNAVAILABLE
 	DATA_LOSS
+
+	RPC_TIMEOUT = 500 * time.Millisecond
 )
