@@ -14,6 +14,11 @@ The passing of labs is as follows:
     - [x] Part 2B: keep a consistent, replicated log of operations [(note)](https://github.com/polebug/MIT6.824_2018/wiki/Lab2B-Raft:-log-replication)
     - [x] Part 2C: persist
 
+- [x] Lab3: [Fault-tolerant Key/Value Service](http://nil.csail.mit.edu/6.824/2018/labs/lab-kvraft.html)
+    - [x] Part 3A: Key/value service without log compaction  
+    - [x] Part 3B: Key/value service with log compaction (TODO: need to refactor code to reduce test time)  
+
+
 
 Reference:
 1. [MapReduce paper](http://nil.csail.mit.edu/6.824/2018/papers/mapreduce.pdf)
