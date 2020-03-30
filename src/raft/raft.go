@@ -365,7 +365,6 @@ func (rf *Raft) SendAppendEntries(server int) {
 
 		if !appendResp.Success {
 			rf.nextIndex[server]--
-			// log.Println("-")
 			rf.mu.Unlock()
 			return
 		}
@@ -375,10 +374,7 @@ func (rf *Raft) SendAppendEntries(server int) {
 		// log.Printf("[AppendEntries RPC]: leader = %v, server = %v, logs = %v, matchIndex | nextIndex = %v | %v, lastIncludedIndex = %v \n", rf.me, server, rf.Logs, rf.matchIndex, rf.nextIndex, rf.LastIncludedIndex)
 
 		rf.mu.Unlock()
-	} else {
-		// log.Println("append fail!")
 	}
-
 }
 
 // SendSnapshot send followers snapshot to compaction log

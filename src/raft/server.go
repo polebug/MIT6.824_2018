@@ -57,7 +57,7 @@ func Make(
 	persister *Persister, // is a place for this server to save its persistent state, and also initially holds the most recent saved state
 	applyCh chan ApplyMsg, // a channel on which the tester or service expects Raft to send ApplyMsg messages
 ) *Raft {
-	log.Println("make")
+	// log.Println("raft make")
 	// initialization
 	rf := &Raft{}
 	rf.mu.Lock()
