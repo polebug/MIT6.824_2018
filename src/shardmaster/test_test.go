@@ -92,11 +92,13 @@ func TestBasic(t *testing.T) {
 	check(t, []int{}, ck)
 
 	var gid1 int = 1
+	// test Join
 	ck.Join(map[int][]string{gid1: []string{"x", "y", "z"}})
 	check(t, []int{gid1}, ck)
 	cfa[1] = ck.Query(-1)
 
 	var gid2 int = 2
+	// test Join
 	ck.Join(map[int][]string{gid2: []string{"a", "b", "c"}})
 	check(t, []int{gid1, gid2}, ck)
 	cfa[2] = ck.Query(-1)
@@ -117,6 +119,7 @@ func TestBasic(t *testing.T) {
 
 	ck.Leave([]int{gid2})
 	cfa[5] = ck.Query(-1)
+	// fmt.Println(cfa)
 
 	fmt.Printf("  ... Passed\n")
 
@@ -126,6 +129,7 @@ func TestBasic(t *testing.T) {
 		cfg.ShutdownServer(s)
 		for i := 0; i < len(cfa); i++ {
 			c := ck.Query(cfa[i].Num)
+			// fmt.Printf("query reply = %v, cfa[i] = %v, num = %v \n", c, cfa[i], cfa[i].Num)
 			check_same_config(t, c, cfa[i])
 		}
 		cfg.StartServer(s)
