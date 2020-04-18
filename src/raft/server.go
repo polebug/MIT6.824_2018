@@ -2,7 +2,6 @@ package raft
 
 import (
 	"labrpc"
-	"log"
 	// "log"
 )
 

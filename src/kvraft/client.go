@@ -56,14 +56,18 @@ func (c *Clerk) SendRPCHandler(peer int, method string, args interface{}, reply 
 
 // Get the value of key
 func (c *Clerk) Get(key string) string {
-	var (
-		peer       = c.lastLeader
-		clientInfo = ClientInfo{ID: c.id, Seq: c.seq}
-		args       = GetArgs{Key: key, Client: clientInfo}
-	)
+	peer := c.lastLeader
+	args := GetArgs{
+		Key: key,
+		Client: ClientInfo{
+			ID:  c.id,
+			Seq: c.seq,
+		},
+	}
 	c.seq++
 
 	for {
+		// try each known server.
 		reply := GetReply{}
 		if ok := c.SendRPCHandler(peer, "KVServer.Get", &args, &reply); ok == rpc.OK {
 			if !reply.WrongLeader {
@@ -72,6 +76,7 @@ func (c *Clerk) Get(key string) string {
 			}
 		}
 		peer = (peer + 1) % len(c.servers)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

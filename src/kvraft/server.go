@@ -141,7 +141,7 @@ func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 }
 
-// GetAgreedCmd
+// GetAgreedCmd get consistent command
 func (kv *KVServer) GetAgreedCmd(index int) chan Op {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -152,13 +152,13 @@ func (kv *KVServer) GetAgreedCmd(index int) chan Op {
 	return kv.agreeCh[index]
 }
 
-// UpdateAgreedCmd
+// UpdateAgreedCmd save consistent command from raft
 func (kv *KVServer) UpdateAgreedCmd(index int, op Op) {
 	kv.GetAgreedCmd(index) <- op
 	// log.Printf("update agree ch = %v \n", op)
 }
 
-// WaitApplyCh
+// WaitApplyCh wait for raft nodes to be consistent
 func (kv *KVServer) WaitApplyCh() {
 	for {
 		kv.mu.Lock()
