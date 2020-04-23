@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"labgob"
 	rpc "labrpc"
-	"log"
 	"math/rand"
 	"sync"
 	"time"
@@ -334,18 +333,17 @@ func (rf *Raft) SendAppendEntries(server int) {
 		LeaderID:     rf.me,
 		Term:         rf.CurrentTerm,
 		LeaderCommit: rf.commitIndex,
-		// PrevLogIndex: rf.nextIndex[server] - 1,
 	}
 	appendResp := AppendEntriesReply{}
 	nextIndex := rf.nextIndex[server]
 
 	// need to sync new logs to thie server
 	if nextIndex > rf.LastIncludedIndex && nextIndex < len(rf.Logs)+rf.LastIncludedIndex {
-		// log.Printf("need to sync new logs, server = %v, len(rf.logs) = %v, nextIndex = %v \n", server, len(rf.Logs), nextIndex)
 		prevLogIndex := nextIndex - 1
 		appendReq.PrevLogIndex = prevLogIndex
 		appendReq.PrevLogTerm = rf.Logs[prevLogIndex-rf.LastIncludedIndex].Term
 		appendReq.Logs = rf.Logs[nextIndex-rf.LastIncludedIndex:]
+		// log.Printf("need to sync new logs, server = %v, args = %v, nextIndex = %v \n", server, appendReq, nextIndex)
 	}
 	rf.mu.Unlock()
 
@@ -470,7 +468,7 @@ func (rf *Raft) WaitCmdApplied() {
 					Command:      rf.Logs[rf.lastApplied-rf.LastIncludedIndex].Command,
 					CommandIndex: rf.lastApplied,
 				}
-				// log.Printf("[Apply]: mgs = %v \n", applyEntry)
+				// log.Printf("[Apply]: mgs = %v, rf.Logs = %v \n", applyEntry, rf.Logs)
 				rf.applyCh <- applyEntry
 			}
 		}
@@ -518,7 +516,7 @@ func (rf *Raft) readPersist(data []byte) {
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&logs) != nil {
-		log.Printf("ERROR: ReadPersist() decode failed, unable to get server state! data = %v \n", string(data))
+		// log.Printf("ERROR: ReadPersist() decode failed, unable to get server state! data = %v \n", string(data))
 		return
 	}
 	rf.CurrentTerm = currentTerm
@@ -526,7 +524,7 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.Logs = logs
 
 	if d.Decode(&lastIncludedIndex) != nil || d.Decode(&lastIncludedTerm) != nil {
-		log.Printf("ERROR: ReadPersist() decode failed, unable to get data about snapshot! data = %v \n", string(data))
+		// log.Printf("ERROR: ReadPersist() decode failed, unable to get data about snapshot! data = %v \n", string(data))
 		return
 	}
 	rf.LastIncludedIndex = lastIncludedIndex

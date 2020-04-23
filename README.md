@@ -18,7 +18,9 @@ The passing of labs is as follows:
     - [x] Part 3A: Key/value service without log compaction  
     - [x] Part 3B: Key/value service with log compaction (TODO: need to refactor code to reduce test time)  
 
-
+- [x] Lab4: [Sharded Key/Value Service](http://nil.csail.mit.edu/6.824/2018/labs/lab-shard.html)
+    - [x] Part 4A: The Shard Master
+    - [x] Part 4B: Sharded Key/Value Server (some failed, TODO)
 
 Reference:
 1. [MapReduce paper](http://nil.csail.mit.edu/6.824/2018/papers/mapreduce.pdf)

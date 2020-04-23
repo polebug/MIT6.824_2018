@@ -126,7 +126,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.ExistSnapshot = false
 
 	if args.Term < rf.CurrentTerm {
-		// log.Println("3")
 		return
 	}
 
